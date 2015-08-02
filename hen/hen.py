@@ -1,11 +1,12 @@
-from dispatcher import Dispatcher
+from argparse import ArgumentParser
+from dispatcher import Dispatcher, parse_address
 from time import time, sleep
 
 import json
 
 class Hen:
 
-    def __init__(self, host, dispatcher):
+    def __init__(self, host, dispatcher, remote_host=""):
         # this is the address that others can connect to
         self.host = host
 
@@ -26,7 +27,12 @@ class Hen:
         # the "fd" and "unacked" messages, which is a dict
         # mapping message number to JSON msg for resending
         # should always include self
-        self.nodes = {}
+        self.nodes = {host: None}
+
+        # now that the leader has been set up, perhaps we should have
+        # been a follower instead?
+        if remote_host != "":
+            self.connect(remote_host)
 
     #
     # Leader Methods
@@ -47,6 +53,7 @@ class Hen:
             # but don't send yet - need to send other messages first
         # increment latest ID
         self.latest_id += 1
+        print("Sent message: %s" % json.dumps(msg))
 
     def handle_leader(self, fd, msg):
         if msg["message"] == "HATCH":
@@ -64,7 +71,7 @@ class Hen:
 
     def hatch(self, fd, host):
         self.nodes[host] = {"fd": fd, "unacked": {}}
-        msg = {"message": "UPDATE", "nodes": self.nodes}
+        msg = {"message": "UPDATE", "nodes": list(self.nodes.keys())}
         self.broadcast(msg)
 
     def pluck(self, fd):
@@ -77,7 +84,7 @@ class Hen:
                 break
         if not changed:
             return
-        msg = {"message": "UPDATE", "nodes": self.nodes}
+        msg = {"message": "UPDATE", "nodes": list(self.nodes.keys())}
         self.broadcast(msg)
 
     def send(self):
@@ -89,7 +96,7 @@ class Hen:
                 pluckfds.append(node["fd"])
             if len(node["unacked"]) > 0:
                 # send the oldest message first
-                msg = json.dumps(list(node["unacked"].values())[0])
+                msg = (list(node["unacked"].values())[0])
                 self.dispatcher.message(node["fd"], msg)
         for fd in pluckfds:
             self.pluck(fd)
@@ -102,9 +109,18 @@ class Hen:
     def campaign(self):
         pass # TODO
 
+    def connect(self, host):
+        self.leaderfd = self.dispatcher.connect(host)
+        self.leaderhost = host
+        msg = {"host" : self.host, "message": "HATCH"}
+        self.dispatcher.message(self.leaderfd, json.dumps(msg))
+
     def handle_follower(self, fd, msg):
+        print("Received: %s" % msg)
         if fd == self.leaderfd:
             # a message from our fearless leader!
+            self.term = msg["term"]
+            self.latest_id = msg["id"]
             if msg["message"] == "CLUCK":
                 self.cluck()
             if msg["message"] == "HEARTBEAT":
@@ -114,6 +130,7 @@ class Hen:
             # ack the message
             msg["message"] = True
             self.dispatcher.message(self.leaderfd, json.dumps(msg))
+            print("Responded: %s" % json.dumps(msg))
         else:
             if msg["message"] == "ELECTME":
                 self.vote(fd, msg)
@@ -176,14 +193,15 @@ class Hen:
     def peck(self):
         for fd, msg in self.dispatcher.poll():
             if msg == "CONNECTED":
-                pass # have to handle this case
-            elif msg == "DISCONNECTED":
+                continue # have to handle this case
+            if msg == "DISCONNECTED":
                 # if the leader disconnected, start a new campaign
                 if fd == self.leaderfd:
                     self.campaign()
-            else:
-                self.handle_message(fd, msg)
+                continue
+            self.handle_message(fd, msg)
 
+        # leader stuff
         if self.leaderfd == -1:
             # time for heartbeat?
             if time() - self.last_heartbeat > 1:
@@ -198,8 +216,19 @@ class Hen:
         return {"term" : term, "id" : id, "message" : response}
 
 if __name__ == "__main__":
-    dsp = Dispatcher(9001)
-    hen = Hen("localhost:9001", dsp)
+    parser = ArgumentParser(description = "Great clucking software. Distributed, even.")
+    parser.add_argument("--host", dest="host", type=str, nargs=1, required=True, help="Local host/port.")
+    parser.add_argument("--connect", dest="connect", type=str, nargs=1, required=False, default="",
+            help="Remote host/port if not leader.")
+    args = parser.parse_args()
+
+    _, port = parse_address(args.host[0])
+    dsp = Dispatcher(port)
+    if args.connect:
+        hen = Hen(args.host[0], dsp, args.connect[0])
+    else:
+        hen = Hen(args.host[0], dsp)
+
     try:
         while True:
             hen.peck()

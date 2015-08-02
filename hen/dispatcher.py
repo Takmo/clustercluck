@@ -1,5 +1,11 @@
 from select import epoll, EPOLLIN, EPOLLERR, EPOLLHUP
-import socket
+from socket import AF_INET, SOCK_STREAM, create_connection, socket
+
+def parse_address(address):
+    split = address.split(":")
+    host = "".join([s for s in split if s != split[-1]])
+    port = int(split[-1])
+    return (host, port)
 
 class Dispatcher():
 
@@ -7,7 +13,7 @@ class Dispatcher():
         print("Setting up the Dispatcher")
         self.port = port
         self.verbose = verbose
-        self.listener = socket.socket(socket.AF_INET,  socket.SOCK_STREAM)
+        self.listener = socket(AF_INET,  SOCK_STREAM)
         self.listener.bind(("", self.port))
         self.listener.listen(5)
         
@@ -25,8 +31,11 @@ class Dispatcher():
         print("Accepted connection on FD %d" % c.fileno())
         return c.fileno()
     
-    def connect(self, address):
-        pass # TODO
+    def connect(self, host):
+        c = create_connection(parse_address(host))
+        self.connections[c.fileno()] = c
+        self.epoll.register(c.fileno(), EPOLLIN | EPOLLERR | EPOLLHUP)
+        return c.fileno()
 
     def disconnect(self, fd):
         if fd not in self.connections.keys():
