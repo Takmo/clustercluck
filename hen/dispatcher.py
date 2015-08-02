@@ -39,7 +39,7 @@ class Dispatcher():
         del self.connections[fd]
 
     def kill(self):
-        for _,c in self.connections:
+        for c in self.connections.values():
             c.close()
         self.listener.close()
         self.connnections = {}
@@ -82,7 +82,9 @@ class Dispatcher():
                         clean = msg.decode("utf-8")
                         ret.append((fd, clean))
                     except UnicodeDecodeError:
-                        print("Got a strange value from FD %d, but we'll keep going." % fd)
+                        print("Got a strange value from FD %d, so it's getting disconnected." % fd)
+                        self.disconnect(fd)
+                        ret.append((fd, "DISCONNECTED"))
                     continue
                 if event == EPOLLERR:
                     print("Encountered an error on FD %d. Disconnecting it." % fd)
