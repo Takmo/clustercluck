@@ -23,12 +23,16 @@ class Dispatcher():
         self.connections[c.fileno()] = c
         self.epoll.register(c.fileno(), EPOLLIN | EPOLLERR | EPOLLHUP)
         print("Accepted connection on FD %d" % c.fileno())
+        return c.fileno()
     
-    def broadcast(self, msg_json):
+    def broadcast(self, msg):
         if self.verbose:
-            print("Broadcasting message: %s" % msg_json)
-        for c in self.connections.values():
-            c.sendall(msg_json)
+            print("Broadcasting message: %s" % msg)
+        for fd in self.connections.keys():
+            self.message(fd, msg)
+
+    def connect(self, address):
+        pass # TODO
 
     def disconnect(self, fd):
         self.epoll.unregister(fd)
@@ -40,12 +44,20 @@ class Dispatcher():
         self.listener.close()
         self.connnections = {}
 
+    def message(self, fd, msg):
+        if fd not in self.connections.keys():
+            print("Attempted to send message to bad FD %d." % fd)
+            return
+        self.connections[fd].sendall(bytearray(msg, "utf-8"))
+
     def poll(self, timeout=0.0010, buffer_size=256):
         events = self.epoll.poll(timeout)
+        ret = []
         for fd, event in events:
             if fd == self.listener.fileno():
                 if event == EPOLLIN:
-                    self.accept()
+                    nfd = self.accept()
+                    ret.append((nfd, "CONNECTED"))
                     continue
                 else:
                     print("Something bad happened to the listening socket. BRB dying.")
@@ -58,23 +70,31 @@ class Dispatcher():
             else:
                 if event == EPOLLIN:
                     c = self.connections[fd]
-                    msg_json = c.recv(buffer_size)
-                    if not msg_json:
+                    msg = c.recv(buffer_size)
+                    if not msg:
                         print("FD %d disconnected." % fd)
                         self.disconnect(fd)
+                        ret.append((fd, "DISCONNECTED"))
                         continue
-                    print("Received message from FD %d: %s" % (fd, msg_json))
-                    self.broadcast(msg_json)
-                    # whatever logic here
+                    if self.verbose:
+                        print("Received message from FD %d: %s" % (fd, msg))
+                    try:
+                        clean = msg.decode("utf-8")
+                        ret.append((fd, clean))
+                    except UnicodeDecodeError:
+                        print("Got a strange value from FD %d, but we'll keep going." % fd)
                     continue
                 if event == EPOLLERR:
                     print("Encountered an error on FD %d. Disconnecting it." % fd)
                     self.disconnect(fd)
+                    ret.append((fd, "DISCONNECTED"))
                     continue
                 if event == EPOLLHUP:
                     print("FD %d hung-up on us. Disconnecting it." % fd)
                     self.disconnect(fd)
+                    ret.append((fd, "DISCONNECTED"))
                     continue
+        return ret
 
 if __name__ is "__main__":
-    print("A rooster ought not be running this. Try 'clustercluck' instead.")
+    print("A rooster ought not be running this. Try 'server.py' instead.")

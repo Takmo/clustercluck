@@ -1,16 +1,22 @@
 from dispatcher import Dispatcher
 from time import sleep
 
-if __name__ != "__main__":
-    print("Well, that's funny. We aren't main. Not gonna run.")
-else:
-    d = Dispatcher(9001)
+if __name__ == "__main__":
 
-    while True:
-        try:
-            d.poll()
+    disp = Dispatcher(9001)
+
+    try:
+        while True:
+            for fd, msg in disp.poll():
+                if msg == "CONNECTED":
+                    disp.message(fd, "Howdy!\n")
+                elif msg == "DISCONNECTED":
+                    pass
+                else:
+                    disp.message(fd, "Lolwut?\n")
             sleep(0.05)
-        except KeyboardInterrupt:
-            break
-    d.kill()
+    except KeyboardInterrupt:
+        pass
+
+    disp.kill()
     print("Bye!")
