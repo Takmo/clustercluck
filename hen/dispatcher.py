@@ -25,12 +25,6 @@ class Dispatcher():
         print("Accepted connection on FD %d" % c.fileno())
         return c.fileno()
     
-    def broadcast(self, msg):
-        if self.verbose:
-            print("Broadcasting message: %s" % msg)
-        for fd in self.connections.keys():
-            self.message(fd, msg)
-
     def connect(self, address):
         pass # TODO
 
