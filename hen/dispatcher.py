@@ -35,6 +35,8 @@ class Dispatcher():
         pass # TODO
 
     def disconnect(self, fd):
+        if fd not in self.connections.keys():
+            return
         self.epoll.unregister(fd)
         del self.connections[fd]
 
