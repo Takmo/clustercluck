@@ -4,6 +4,59 @@ from time import time, sleep
 
 import json
 
+class LeaderState:
+
+    def __init__(self, host, nodes, dispatcher):
+        pass
+
+    def broadcast(self, msg):
+        pass
+    
+    def handle_message(self, fd, msg):
+        # can return this or FollowState()
+        pass
+
+    def hatch(self, fd, host):
+        pass
+
+    def pluck(self, fd):
+        pass
+
+    def send(self):
+        pass
+
+class ElectionState:
+
+    def __init__(self, host, nodes, dispatcher):
+        pass
+
+    def campaign_all(self):
+        # send a request to all nodes
+        pass
+    
+    def handle_message(self, fd, msg):
+        # can return this, FollowState(), or LeaderState()
+        pass
+
+
+class FollowState:
+
+    def __init__(self, host, dispatcher, remote_host):
+        pass
+
+    def connect(self, host):
+        pass
+
+    def handle_message(self, fd, msg):
+        # can return this or ElectionState()
+        pass
+
+    def update(self, nodes):
+        pass
+
+    def vote(self, msg):
+        pass
+
 class Hen:
 
     def __init__(self, host, dispatcher, remote_host=""):
@@ -91,6 +144,8 @@ class Hen:
         pluckfds = []
         for n in self.nodes:
             node = self.nodes[n]
+            if n == self.host:
+                continue
             if len(node["unacked"]) > 10:
                 # disconnect if it hasn't acked 10+ messages
                 pluckfds.append(node["fd"])
@@ -206,7 +261,6 @@ class Hen:
             # time for heartbeat?
             if time() - self.last_heartbeat > 1:
                 # heartbeat every half a second
-                print("HEARTBEAT")
                 self.broadcast({"message": "HEARTBEAT"})
                 self.last_heartbeat = time()
             # send messages
