@@ -4,95 +4,33 @@ from time import time, sleep
 
 import json
 
-class LeaderState:
+class RaftState:
 
-    def __init__(self, host, nodes, dispatcher):
-        pass
+    def resp(self, term, id, response):
+        return {"term" : term, "id" : id, "message" : response}
 
-    def broadcast(self, msg):
-        pass
-    
-    def handle_message(self, fd, msg):
-        # can return this or FollowState()
-        pass
+class LeaderState(RaftState):
 
-    def hatch(self, fd, host):
-        pass
-
-    def pluck(self, fd):
-        pass
-
-    def send(self):
-        pass
-
-class ElectionState:
-
-    def __init__(self, host, nodes, dispatcher):
-        pass
-
-    def campaign_all(self):
-        # send a request to all nodes
-        pass
-    
-    def handle_message(self, fd, msg):
-        # can return this, FollowState(), or LeaderState()
-        pass
-
-
-class FollowState:
-
-    def __init__(self, host, dispatcher, remote_host):
-        pass
-
-    def connect(self, host):
-        pass
-
-    def handle_message(self, fd, msg):
-        # can return this or ElectionState()
-        pass
-
-    def update(self, nodes):
-        pass
-
-    def vote(self, msg):
-        pass
-
-class Hen:
-
-    def __init__(self, host, dispatcher, remote_host=""):
-        # this is the address that others can connect to
+    def __init__(self, host, nodes, dispatcher, term=0, latest_id=0):
+        # set our host - never changes
         self.host = host
 
-        # the dispatcher we use to send messages
+        # same with dispatcher
         self.dispatcher = dispatcher
 
-        # stores the information for the leader
-        self.leaderfd = -1 # I AM LEADER NAO
-        self.leaderhost = self.host
+        # because this always comes either initially or from ElectionState
+        # this will already be set up. remember that nodes here hold address,
+        # fd, and unacknowledged messages. In FollowState they just hold addresses.
+        self.nodes = nodes
 
-        # the current term; important for RAFT
-        self.term = 0
+        # set term, latest_id, and heartbeat time
+        self.term = term
         self.latest_id = 0
         self.last_heartbeat = time()
 
-        # for followers, this is a map from host address to FD
-        # for leaders, map from host address to dict containing
-        # the "fd" and "unacked" messages, which is a dict
-        # mapping message number to JSON msg for resending
-        # should always include self
-        self.nodes = {host: None}
-
-        # now that the leader has been set up, perhaps we should have
-        # been a follower instead?
-        if remote_host != "":
-            self.connect(remote_host)
-
-    #
-    # Leader Methods
-    #
-
     def broadcast(self, msg):
-        # set the term and ID, but assume message is otherwise prepared
+        # send out a message to everyone but us
+        # assume that the message was prepared, then just add term, id, and host
         msg["term"] = self.term
         msg["id"] = self.latest_id
         msg["host"] = self.host
@@ -106,12 +44,14 @@ class Hen:
             # but don't send yet - need to send other messages first
         # increment latest ID
         self.latest_id += 1
-        print("Sent message: %s" % json.dumps(msg))
-
-    def handle_leader(self, fd, msg):
+    
+    def chrip(self, fd, msg):
+        # can return this or FollowState()
+        # this method probably needs lots of work, should definitely handle
+        # responses to a new election, but maybe shouldn't vote?
         if msg["message"] == "HATCH":
             self.hatch(fd, msg["host"])
-            return
+            return self
         # everything else is basically just checking acks
         for n in self.nodes:
             node = self.nodes[n]
@@ -119,13 +59,24 @@ class Hen:
                 for id in node["unacked"]:
                     if id == msg["id"]:
                         del node["unacked"][id]
-                        return
+                        return self
         # man that looks cool ^.^
+        return self
 
     def hatch(self, fd, host):
         self.nodes[host] = {"fd": fd, "unacked": {}}
         msg = {"message": "UPDATE", "nodes": list(self.nodes.keys())}
         self.broadcast(msg)
+        print("A new Hen at %s has hatched!" % host)
+
+    def peck(self):
+        # time for heartbeat?
+        if time() - self.last_heartbeat > 1:
+            # heartbeat every half a second
+            self.broadcast({"message": "HEARTBEAT"})
+            self.last_heartbeat = time()
+        # send messages
+        self.send()
 
     def pluck(self, fd):
         changed = False
@@ -133,18 +84,18 @@ class Hen:
             node = self.nodes[n]
             if node["fd"] == fd:
                 del self.nodes[n]
-                changed = True
-                break
-        if not changed:
-            return
-        msg = {"message": "UPDATE", "nodes": list(self.nodes.keys())}
-        self.broadcast(msg)
+                msg = {"message": "UPDATE", "nodes": list(self.nodes.keys())}
+                self.broadcast(msg)
+                print("Hen at %s was plucked!" % n)
+                break;
 
     def send(self):
         pluckfds = []
         for n in self.nodes:
             node = self.nodes[n]
             if n == self.host:
+                # we never have to send to ourselves, but we should
+                # be in self.nodes
                 continue
             if len(node["unacked"]) > 10:
                 # disconnect if it hasn't acked 10+ messages
@@ -157,20 +108,32 @@ class Hen:
             self.pluck(fd)
             self.dispatcher.disconnect(fd)
 
-    #
-    # Follower Methods
-    #
+class ElectionState(RaftState):
 
-    def campaign(self):
-        pass # TODO
+    def __init__(self, host, nodes, dispatcher):
+        pass
 
-    def connect(self, host):
-        self.leaderfd = self.dispatcher.connect(host)
-        self.leaderhost = host
-        msg = {"host" : self.host, "message": "HATCH"}
-        self.dispatcher.message(self.leaderfd, json.dumps(msg))
+    def campaign_all(self):
+        # send a request to all nodes
+        pass
+    
+    def handle_message(self, fd, msg):
+        # can return this, FollowState(), or LeaderState()
+        pass
 
-    def handle_follower(self, fd, msg):
+#TODO If the leader dies or times out, the first node to notice should
+#TODO delete the leader's presence. Then all nodes receiving a campaign
+#TODO request should do the same. The leader will have to ask to rejoin.
+
+class FollowState(RaftState):
+
+    def __init__(self, host, dispatcher, remote_host, term=0):
+        # set our basic things
+        self.host = host
+        self.term = termm
+        self.dispatcher = dispatcher
+
+    def chrip(self, fd, msg):
         print("Received: %s" % msg)
         if fd == self.leaderfd:
             # a message from our fearless leader!
@@ -205,8 +168,14 @@ class Hen:
                 error["leader"] = self.leaderhost
                 self.dispatcher.message(fd, json.dumps(error))
 
-    def kingme(self):
-        pass # TODO become leader
+    def connect(self, host):
+        # TODO make this handle reconnects to correct host
+        self.leaderfd = self.dispatcher.connect(host)
+        self.leaderhost = host
+        msg = {"host" : self.host, "message": "HATCH"}
+        self.dispatcher.message(self.leaderfd, json.dumps(msg))
+        # if we connected to the wrong host, it will respond with
+        # the actual leader, who we should connect to
 
     def update(self, nodes):
         self.nodes = {}
@@ -223,12 +192,13 @@ class Hen:
             okay = self.resp(self.term, msg["id"], True)
             self.dispatcher.message(fd, json.dumps(okay))
 
-    #
-    # Common Methods
-    #
+class Hen:
 
-    def cluck(self):
-        pass # TODO screw with logs
+    def __init__(self, host, dispatcher, remote_host=""):
+        if remote_host == "":
+            self.state = LeaderState(host, {host: None}, dispatcher)
+        else:
+            self.state = FollowState(host, dispatcher, remote_host)
 
     def handle_message(self, fd, message):
         try:
@@ -251,23 +221,14 @@ class Hen:
                 continue # have to handle this case
             if msg == "DISCONNECTED":
                 # if the leader disconnected, start a new campaign
-                if fd == self.leaderfd:
-                    self.campaign()
+                #if fd == self.leaderfd:
+                    #self.campaign()
                 continue
-            self.handle_message(fd, msg)
+            self.state.chirp(fd, msg)
 
         # leader stuff
-        if self.leaderfd == -1:
-            # time for heartbeat?
-            if time() - self.last_heartbeat > 1:
-                # heartbeat every half a second
-                self.broadcast({"message": "HEARTBEAT"})
-                self.last_heartbeat = time()
-            # send messages
-            self.send()
-
-    def resp(self, term, id, response):
-        return {"term" : term, "id" : id, "message" : response}
+        if self.state.peck != None:
+            self.state.peck()
 
 if __name__ == "__main__":
     parser = ArgumentParser(description = "Great clucking software. Distributed, even.")
