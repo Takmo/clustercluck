@@ -45,7 +45,7 @@ class LeaderState(RaftState):
         # increment latest ID
         self.latest_id += 1
     
-    def chrip(self, fd, msg):
+    def chirp(self, fd, msg):
         # can return this or FollowState()
         # this method probably needs lots of work, should definitely handle
         # responses to a new election, but maybe shouldn't vote?
@@ -110,11 +110,19 @@ class LeaderState(RaftState):
 
 class ElectionState(RaftState):
 
+    # TODO - literally all of this
+
     def __init__(self, host, nodes, dispatcher):
         pass
 
     def campaign_all(self):
         # send a request to all nodes
+        pass
+    
+    def chirp(self, fd, msg):
+        pass
+
+    def peck(self, fd, msg):
         pass
     
     def handle_message(self, fd, msg):
@@ -130,10 +138,11 @@ class FollowState(RaftState):
     def __init__(self, host, dispatcher, remote_host, term=0):
         # set our basic things
         self.host = host
-        self.term = termm
+        self.term = term
         self.dispatcher = dispatcher
+        self.connect(remote_host)
 
-    def chrip(self, fd, msg):
+    def chirp(self, fd, msg):
         print("Received: %s" % msg)
         if fd == self.leaderfd:
             # a message from our fearless leader!
@@ -167,6 +176,7 @@ class FollowState(RaftState):
                 error = self.resp(msg["term"], msg["id"], "NOT LEADER")
                 error["leader"] = self.leaderhost
                 self.dispatcher.message(fd, json.dumps(error))
+        return self
 
     def connect(self, host):
         # TODO make this handle reconnects to correct host
@@ -176,6 +186,15 @@ class FollowState(RaftState):
         self.dispatcher.message(self.leaderfd, json.dumps(msg))
         # if we connected to the wrong host, it will respond with
         # the actual leader, who we should connect to
+
+    def peck(self):
+        
+        def chirp(self, fd, msg):
+            pass
+
+        def peck(self, fd, msg):
+            pass
+        pass
 
     def update(self, nodes):
         self.nodes = {}
@@ -192,15 +211,16 @@ class FollowState(RaftState):
             okay = self.resp(self.term, msg["id"], True)
             self.dispatcher.message(fd, json.dumps(okay))
 
-class Hen:
+class Hen():
 
     def __init__(self, host, dispatcher, remote_host=""):
+        self.dispatcher = dispatcher
         if remote_host == "":
             self.state = LeaderState(host, {host: None}, dispatcher)
         else:
             self.state = FollowState(host, dispatcher, remote_host)
 
-    def handle_message(self, fd, message):
+    def chirp(self, fd, message):
         try:
             msg = json.loads(message)
         except (TypeError,ValueError):
@@ -210,10 +230,7 @@ class Hen:
                 self.pluck(fd)
             self.dispatcher.disconnect(fd)
             return
-        if self.leaderfd == -1:
-            self.handle_leader(fd, msg)
-        else:
-            self.handle_follower(fd, msg)
+        self.state = self.state.chirp(fd, msg)
 
     def peck(self):
         for fd, msg in self.dispatcher.poll():
@@ -224,11 +241,10 @@ class Hen:
                 #if fd == self.leaderfd:
                     #self.campaign()
                 continue
-            self.state.chirp(fd, msg)
+            self.chirp(fd, msg)
 
         # leader stuff
-        if self.state.peck != None:
-            self.state.peck()
+        self.state.peck()
 
 if __name__ == "__main__":
     parser = ArgumentParser(description = "Great clucking software. Distributed, even.")
