@@ -4,6 +4,10 @@ from time import time, sleep
 
 import json
 
+# All of these happy states are transitioning over to Raft*.py All of this
+# is here temporarily for a working reference as everything switches to
+# actually using Raft (mostly) correctly.
+
 class RaftState:
 
     def resp(self, term, id, response):
@@ -108,31 +112,6 @@ class LeaderState(RaftState):
             self.pluck(fd)
             self.dispatcher.disconnect(fd)
 
-class ElectionState(RaftState):
-
-    # TODO - literally all of this
-
-    def __init__(self, host, nodes, dispatcher):
-        pass
-
-    def campaign_all(self):
-        # send a request to all nodes
-        pass
-    
-    def chirp(self, fd, msg):
-        pass
-
-    def peck(self, fd, msg):
-        pass
-    
-    def handle_message(self, fd, msg):
-        # can return this, FollowState(), or LeaderState()
-        pass
-
-#TODO If the leader dies or times out, the first node to notice should
-#TODO delete the leader's presence. Then all nodes receiving a campaign
-#TODO request should do the same. The leader will have to ask to rejoin.
-
 class FollowState(RaftState):
 
     def __init__(self, host, dispatcher, remote_host, term=0):
@@ -159,57 +138,25 @@ class FollowState(RaftState):
             self.dispatcher.message(self.leaderfd, json.dumps(msg))
             print("Responded: %s" % json.dumps(msg))
         else:
-            if msg["message"] == "ELECTME":
-                self.vote(fd, msg)
-            elif msg["message"] == "LEADER":
-                # if msg term is greater than ours, new leader
-                if msg["term"] > self.term:
-                    self.term = msg["term"]
-                    self.leaderhost = msg["host"]
-                    self.leaderfd = fd
-                    ack = True
-                else:
-                    ack = False
-                msg["message"] = ack
-                self.dispatcher.message(fd, json.dumps(msg))
-            else:
-                error = self.resp(msg["term"], msg["id"], "NOT LEADER")
-                error["leader"] = self.leaderhost
-                self.dispatcher.message(fd, json.dumps(error))
+            error = self.resp(msg["term"], msg["id"], "NOT LEADER")
+            error["leader"] = self.leaderhost
+            self.dispatcher.message(fd, json.dumps(error))
         return self
 
     def connect(self, host):
-        # TODO make this handle reconnects to correct host
         self.leaderfd = self.dispatcher.connect(host)
         self.leaderhost = host
         msg = {"host" : self.host, "message": "HATCH"}
         self.dispatcher.message(self.leaderfd, json.dumps(msg))
-        # if we connected to the wrong host, it will respond with
-        # the actual leader, who we should connect to
 
     def peck(self):
-        
-        def chirp(self, fd, msg):
-            pass
-
-        def peck(self, fd, msg):
-            pass
         pass
-
+        
     def update(self, nodes):
         self.nodes = {}
         for node in nodes:
             self.nodes[node] = -1
         # the -1 FD means it's not connected
-
-    def vote(self, fd, msg):
-        if msg["term"] <= self.term:
-            error = self.resp(self.term, msg["id"], False)
-            self.dispatcher.message(fd, json.dumps(error))
-        else:
-            self.term = msg["term"]
-            okay = self.resp(self.term, msg["id"], True)
-            self.dispatcher.message(fd, json.dumps(okay))
 
 class Hen():
 
