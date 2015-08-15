@@ -103,5 +103,3 @@ class Dispatcher():
                     continue
         return ret
 
-if __name__ is "__main__":
-    print("A rooster ought not be running this. Try 'server.py' instead.")
